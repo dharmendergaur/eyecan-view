@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Eye Scan Viewer</title>
+    <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+
+    <style>
+      :root {
+        --bg: #fff;
+        --fg: #111827;
+        --muted: #6b7280;
+        --border: #e5e7eb;
+        --panel: #f9fafb;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 26px 22px 34px;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          Helvetica,
+          Arial;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      h1 {
+        margin: 0;
+        font-size: 20px;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .toolbar {
+        margin-top: 14px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        border-radius: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 14px;
+        align-items: end;
+      }
+      label {
+        font-size: 12px;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 6px;
+      }
+      input[type="file"],
+      select,
+      input[type="text"] {
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #fff;
+        min-width: 220px;
+      }
+      select {
+        min-width: 190px;
+      }
+
+      .toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--fg);
+        user-select: none;
+        white-space: nowrap;
+      }
+      .toggle input {
+        margin: 0;
+      }
+
+      .grid {
+        margin-top: 14px;
+        display: grid;
+        gap: 14px;
+        grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+        align-items: start;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        background: #fff;
+      }
+      .card-header {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .title {
+        min-width: 0;
+      }
+      .filename {
+        font-size: 13px;
+        font-weight: 650;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .subtitle {
+        margin-top: 2px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .badge {
+        font-size: 12px;
+        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .plot {
+        width: 100%;
+        aspect-ratio: 4 / 3; /* fills better for this kind of data */
+        min-height: 320px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <h1>Eye Scan Viewer</h1>
+      <div class="meta">CMS Private</div>
+    </header>
+
+    <div class="toolbar">
+      <div>
+        <label for="files">Choose a folder (reads .txt)</label>
+        <input type="file" id="files" webkitdirectory multiple />
+      </div>
+
+      <div>
+        <label for="zmode">Z value</label>
+        <select id="zmode">
+          <option value="nErrors">nErrors (raw)</option>
+          <option value="ber" selected>BER = nErrors / nSamples</option>
+          <option value="log10ber">log10(BER)</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="colorscale">Color scale</label>
+        <select id="colorscale">
+          <option value="Viridis" selected>Viridis</option>
+          <option value="Cividis">Cividis</option>
+          <option value="Turbo">Turbo</option>
+          <option value="Jet">Jet (legacy)</option>
+          <option value="Gray">Gray</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="timeUnit">Time unit label</label>
+        <input id="timeUnit" type="text" value="UI (offset)" />
+      </div>
+
+      <div>
+        <label for="voltUnit">Voltage unit label</label>
+        <input id="voltUnit" type="text" value="mV (offset)" />
+      </div>
+
+      <label class="toggle" title="Zoom/pan on one plot updates all plots">
+        <input type="checkbox" id="linkAxes" checked />
+        Link axes across plots
+      </label>
+
+      <label
+        class="toggle"
+        title="Lock aspect ratio (often causes extra margins). Usually keep OFF."
+      >
+        <input type="checkbox" id="lockAspect" />
+        Square pixels (lock aspect)
+      </label>
+    </div>
+
+    <div id="plots" class="grid"></div>
+
+    <script>
+      const elFiles = document.getElementById("files");
+      const elPlots = document.getElementById("plots");
+      const elZMode = document.getElementById("zmode");
+      const elColorscale = document.getElementById("colorscale");
+      const elTimeUnit = document.getElementById("timeUnit");
+      const elVoltUnit = document.getElementById("voltUnit");
+      const elLinkAxes = document.getElementById("linkAxes");
+      const elLockAspect = document.getElementById("lockAspect");
+
+      const plotRegistry = []; // { plotDiv }
+
+      function parseHeaderAndData(text) {
+        const lines = text.split(/\r?\n/);
+        const header = {};
+        const dataLines = [];
+
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t) continue;
+
+          if (t.startsWith("#")) {
+            const m = t.match(/^#([^:]+):\s*(.*)$/);
+            if (m) {
+              const key = m[1].trim();
+              let val = (m[2] ?? "").trim();
+              val = val.replace(/^'(.*)'$/, "$1");
+              header[key] = val;
+            }
+            continue;
+          }
+          dataLines.push(t);
+        }
+        return { header, dataLines };
+      }
+
+      function safeNumber(s) {
+        const v = Number(s);
+        return Number.isFinite(v) ? v : null;
+      }
+
+      function buildGrid(x, y, z) {
+        const xs = Array.from(new Set(x)).sort((a, b) => a - b);
+        const ys = Array.from(new Set(y)).sort((a, b) => a - b);
+
+        const xi = new Map(xs.map((v, i) => [v, i]));
+        const yi = new Map(ys.map((v, i) => [v, i]));
+
+        const grid = Array.from({ length: ys.length }, () =>
+          Array.from({ length: xs.length }, () => null),
+        );
+
+        for (let i = 0; i < z.length; i++) {
+          const cx = xi.get(x[i]);
+          const cy = yi.get(y[i]);
+          if (cx === undefined || cy === undefined) continue;
+          grid[cy][cx] = z[i];
+        }
+        return { xs, ys, grid };
+      }
+
+      function computeZ(parts, header) {
+        const log2n = safeNumber(parts[2]);
+        const nErrors = safeNumber(parts[3]);
+        if (nErrors === null) return null;
+
+        if (elZMode.value === "nErrors") return nErrors;
+        if (log2n === null) return null;
+
+        const nSamples = Math.pow(2, log2n) - 1;
+        if (!(nSamples > 0)) return null;
+
+        let ber = nErrors / nSamples;
+
+        const berFloor = header.berFloor ? Number(header.berFloor) : null;
+        if (ber === 0 && Number.isFinite(berFloor) && berFloor > 0)
+          ber = berFloor;
+
+        if (elZMode.value === "ber") return ber;
+        if (ber <= 0) return null;
+        return Math.log10(ber);
+      }
+
+      function zLabelFromMode(header) {
+        if (elZMode.value === "nErrors") return "nErrors";
+        if (elZMode.value === "ber") return "BER";
+        return "log10(BER)";
+      }
+
+      function subtitleFromHeader(header) {
+        const pieces = [];
+        if (header.empChannel) pieces.push(`empChannel=${header.empChannel}`);
+        if (header.rxMGT) pieces.push(`rxMGT=${header.rxMGT}`);
+        if (header.payloadClock) pieces.push(`clk=${header.payloadClock} MHz`);
+        if (header.startTimeUTC && header.endTimeUTC)
+          pieces.push(`${header.startTimeUTC} → ${header.endTimeUTC} UTC`);
+        return pieces.join(" • ");
+      }
+
+      function initialRangesFromHeader(header) {
+        // Your files include xmax/ymax. Use them to avoid “zoom out too far”.
+        const xmax = header.xmax ? Number(header.xmax) : null;
+        const ymax = header.ymax ? Number(header.ymax) : null;
+
+        if (Number.isFinite(xmax) && Number.isFinite(ymax)) {
+          return { x: [-xmax, xmax], y: [-ymax, ymax] };
+        }
+        return null;
+      }
+
+      let isRelaying = false;
+      function attachAxisRelay(plotDiv) {
+        plotDiv.on("plotly_relayout", (ev) => {
+          if (!elLinkAxes.checked) return;
+          if (isRelaying) return;
+
+          const xr0 = ev["xaxis.range[0]"];
+          const xr1 = ev["xaxis.range[1]"];
+          const yr0 = ev["yaxis.range[0]"];
+          const yr1 = ev["yaxis.range[1]"];
+          const autorangeX = ev["xaxis.autorange"];
+          const autorangeY = ev["yaxis.autorange"];
+
+          const update = {};
+          if (autorangeX) update["xaxis.autorange"] = true;
+          if (autorangeY) update["yaxis.autorange"] = true;
+          if (xr0 !== undefined && xr1 !== undefined)
+            update["xaxis.range"] = [xr0, xr1];
+          if (yr0 !== undefined && yr1 !== undefined)
+            update["yaxis.range"] = [yr0, yr1];
+
+          if (Object.keys(update).length === 0) return;
+
+          isRelaying = true;
+          const targets = plotRegistry
+            .map((p) => p.plotDiv)
+            .filter((d) => d !== plotDiv);
+          Promise.all(targets.map((d) => Plotly.relayout(d, update))).finally(
+            () => {
+              isRelaying = false;
+            },
+          );
+        });
+      }
+
+      async function renderAll(files) {
+        elPlots.innerHTML = "";
+        plotRegistry.length = 0;
+
+        const txtFiles = Array.from(files).filter((f) =>
+          f.name.toLowerCase().endsWith(".txt"),
+        );
+
+        // Parse all up-front so we can compute a consistent range when linking is on.
+        const parsed = [];
+        for (const file of txtFiles) {
+          const text = await file.text();
+          const { header, dataLines } = parseHeaderAndData(text);
+
+          const x = [],
+            y = [],
+            z = [];
+          for (const line of dataLines) {
+            const parts = line.split(",").map((s) => s.trim());
+            if (parts.length < 4) continue;
+
+            const xv = safeNumber(parts[0]);
+            const yv = safeNumber(parts[1]);
+            if (xv === null || yv === null) continue;
+
+            const zv = computeZ(parts, header);
+            if (zv === null || !Number.isFinite(zv)) continue;
+
+            x.push(xv);
+            y.push(yv);
+            z.push(zv);
+          }
+
+          if (x.length === 0) continue;
+          parsed.push({ file, header, x, y, z });
+        }
+
+        // Prefer header-based ranges (tight, correct). If missing, fall back to autorange.
+        let linkedRanges = null;
+        if (elLinkAxes.checked) {
+          // Use the first file’s declared ranges as the canonical view (common in scans).
+          linkedRanges = parsed.length
+            ? initialRangesFromHeader(parsed[0].header)
+            : null;
+        }
+
+        for (const item of parsed) {
+          const { file, header, x, y, z } = item;
+          const { xs, ys, grid } = buildGrid(x, y, z);
+
+          const card = document.createElement("div");
+          card.className = "card";
+
+          const h = document.createElement("div");
+          h.className = "card-header";
+
+          const left = document.createElement("div");
+          left.className = "title";
+
+          const fn = document.createElement("div");
+          fn.className = "filename";
+          fn.textContent = file.name;
+
+          const sub = document.createElement("div");
+          sub.className = "subtitle";
+          sub.textContent =
+            subtitleFromHeader(header) || `Grid: ${xs.length}×${ys.length}`;
+
+          left.appendChild(fn);
+          left.appendChild(sub);
+
+          const badge = document.createElement("div");
+          badge.className = "badge";
+          badge.textContent = "CMS Private";
+
+          h.appendChild(left);
+          h.appendChild(badge);
+
+          const plotDiv = document.createElement("div");
+          plotDiv.className = "plot";
+
+          card.appendChild(h);
+          card.appendChild(plotDiv);
+          elPlots.appendChild(card);
+
+          const xLabel = `timeOffset (${elTimeUnit.value || "unit"})`;
+          const yLabel = `voltageOffset (${elVoltUnit.value || "unit"})`;
+          const zLabel = zLabelFromMode(header);
+
+          const data = [
+            {
+              x: xs,
+              y: ys,
+              z: grid,
+              type: "heatmap",
+              colorscale: elColorscale.value,
+              zsmooth: false,
+              hovertemplate:
+                "timeOffset: %{x}<br>voltageOffset: %{y}<br>" +
+                zLabel +
+                ": %{z}<extra></extra>",
+              colorbar: { title: { text: zLabel, side: "right" } },
+            },
+          ];
+
+          const layout = {
+            autosize: true,
+            margin: { l: 70, r: 18, t: 10, b: 70 },
+            paper_bgcolor: "white",
+            plot_bgcolor: "white",
+            xaxis: {
+              title: { text: xLabel },
+              zeroline: false,
+              showgrid: false,
+              ticks: "outside",
+              ticklen: 4,
+              mirror: true,
+              linewidth: 1,
+              linecolor: "#111827",
+              autorange: true,
+            },
+            yaxis: {
+              title: { text: yLabel },
+              zeroline: false,
+              showgrid: false,
+              ticks: "outside",
+              ticklen: 4,
+              mirror: true,
+              linewidth: 1,
+              linecolor: "#111827",
+              autorange: true,
+            },
+          };
+
+          // IMPORTANT: only lock aspect if user asked (otherwise you get the “need to zoom” effect)
+          if (elLockAspect.checked) {
+            layout.yaxis.scaleanchor = "x";
+            layout.yaxis.scaleratio = 1;
+          }
+
+          // When linking axes, set an initial tight range based on declared scan size
+          if (linkedRanges) {
+            layout.xaxis.autorange = false;
+            layout.yaxis.autorange = false;
+            layout.xaxis.range = linkedRanges.x;
+            layout.yaxis.range = linkedRanges.y;
+          }
+
+          const config = {
+            responsive: true,
+            displaylogo: false,
+          };
+
+          await Plotly.newPlot(plotDiv, data, layout, config);
+
+          plotRegistry.push({ plotDiv });
+          attachAxisRelay(plotDiv);
+        }
+
+        requestAnimationFrame(() => {
+          for (const { plotDiv } of plotRegistry) Plotly.Plots.resize(plotDiv);
+        });
+      }
+
+      elFiles.addEventListener("change", async (e) =>
+        renderAll(e.target.files),
+      );
+
+      [
+        elZMode,
+        elColorscale,
+        elTimeUnit,
+        elVoltUnit,
+        elLinkAxes,
+        elLockAspect,
+      ].forEach((el) =>
+        el.addEventListener("change", async () => {
+          if (elFiles.files && elFiles.files.length)
+            await renderAll(elFiles.files);
+        }),
+      );
+
+      window.addEventListener("resize", () => {
+        for (const { plotDiv } of plotRegistry) Plotly.Plots.resize(plotDiv);
+      });
+    </script>
+  </body>
+</html>

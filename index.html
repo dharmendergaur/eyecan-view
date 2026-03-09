@@ -14,66 +14,41 @@
       }
     </style>
   </head>
-
   <body>
     <h2>Eye Scan Viewer</h2>
-
     <input type="file" id="files" webkitdirectory multiple />
-
     <div id="plots"></div>
-
     <script>
       document.getElementById("files").addEventListener("change", function (e) {
         const files = e.target.files;
         const container = document.getElementById("plots");
         container.innerHTML = "";
-
         Array.from(files).forEach((file) => {
           if (!file.name.endsWith(".txt")) return;
-
           const reader = new FileReader();
-
           reader.onload = function (event) {
             const text = event.target.result;
             const lines = text.split("\n");
-
             let x = [];
             let y = [];
             let z = [];
-
             lines.forEach((line) => {
               if (line.startsWith("#") || line.trim() === "") return;
-
               const parts = line.split(",");
-
               if (parts.length < 4) return;
-
               x.push(Number(parts[0]));
               y.push(Number(parts[1]));
               z.push(Number(parts[3]));
             });
-
             const plotDiv = document.createElement("div");
             plotDiv.className = "plot";
             container.appendChild(plotDiv);
-
             Plotly.newPlot(
               plotDiv,
-              [
-                {
-                  x: x,
-                  y: y,
-                  z: z,
-                  type: "heatmap",
-                  colorscale: "Jet",
-                },
-              ],
-              {
-                title: file.name,
-              },
+              [{ x: x, y: y, z: z, type: "heatmap", colorscale: "Jet" }],
+              { title: file.name },
             );
           };
-
           reader.readAsText(file);
         });
       });
