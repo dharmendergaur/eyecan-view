@@ -1,0 +1,231 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+      body {
+        font-family: Arial;
+      }
+      .plot {
+        width: 600px;
+        height: 500px;
+        display: inline-block;
+        vertical-align: top;
+        margin: 10px;
+      }
+      .metrics {
+        font-size: 14px;
+        margin-top: 5px;
+      }
+      .controls {
+        margin-bottom: 15px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h2>Eye Scan Viewer</h2>
+
+    <div class="controls">
+      <input type="file" id="files" webkitdirectory multiple />
+
+      <label>
+        Mode:
+        <select id="mode">
+          <option value="count">Error Count</option>
+          <option value="ber">BER</option>
+          <option value="logber">log10(BER)</option>
+        </select>
+      </label>
+
+      <label id="toleranceLabel">
+        Max Errors:
+        <input type="number" id="tolerance" value="0" step="0.1" />
+      </label>
+
+      <button id="recalc">Update</button>
+    </div>
+
+    <div id="plots"></div>
+
+    <script>
+      let storedData = [];
+
+      function updateToleranceUI() {
+        const mode = document.getElementById("mode").value;
+        const tolInput = document.getElementById("tolerance");
+        const label = document.getElementById("toleranceLabel");
+
+        if (mode === "count") {
+          tolInput.value = 0;
+          tolInput.step = 1;
+          label.childNodes[0].nodeValue = "Max Errors: ";
+        }
+
+        if (mode === "ber") {
+          tolInput.value = 1e-6;
+          tolInput.step = 1e-6;
+          label.childNodes[0].nodeValue = "Max BER: ";
+        }
+
+        if (mode === "logber") {
+          tolInput.value = -6;
+          tolInput.step = 0.5;
+          label.childNodes[0].nodeValue = "Max log10(BER): ";
+        }
+      }
+
+      function computeZ(data, mode) {
+        let zComputed = [];
+
+        for (let i = 0; i < data.z.length; i++) {
+          const errors = data.z[i];
+          const logSamples = data.samplesLog[i];
+
+          const nSamples = Math.pow(2, logSamples) - 1;
+
+          let value;
+
+          if (mode === "count") {
+            value = errors;
+          } else if (mode === "ber") {
+            value = nSamples > 0 ? errors / nSamples : 0;
+          } else if (mode === "logber") {
+            const ber = nSamples > 0 ? errors / nSamples : 0;
+            value = ber > 0 ? Math.log10(ber) : -12;
+          }
+
+          zComputed.push(value);
+        }
+
+        return zComputed;
+      }
+
+      function computeMetrics(data, zValues, tolerance) {
+        let xZero = [];
+        let yZero = [];
+        let zeroCount = 0;
+
+        for (let i = 0; i < zValues.length; i++) {
+          if (zValues[i] <= tolerance) {
+            zeroCount++;
+            xZero.push(data.x[i]);
+            yZero.push(data.y[i]);
+          }
+        }
+
+        if (xZero.length === 0) {
+          return { zeroCount: 0, xSpan: 0, ySpan: 0, area: 0 };
+        }
+
+        const xSpan = Math.max(...xZero) - Math.min(...xZero);
+        const ySpan = Math.max(...yZero) - Math.min(...yZero);
+        const area = xSpan * ySpan;
+
+        return { zeroCount, xSpan, ySpan, area };
+      }
+
+      function renderPlots() {
+        const container = document.getElementById("plots");
+        container.innerHTML = "";
+
+        const tolerance = Number(document.getElementById("tolerance").value);
+        const mode = document.getElementById("mode").value;
+
+        storedData.forEach((data) => {
+          const zValues = computeZ(data, mode);
+
+          const plotDiv = document.createElement("div");
+          plotDiv.className = "plot";
+
+          const metricsDiv = document.createElement("div");
+          metricsDiv.className = "metrics";
+
+          const metrics = computeMetrics(data, zValues, tolerance);
+
+          metricsDiv.innerHTML = `
+            <b>${data.name}</b><br>
+            Mode: ${mode}<br>
+            Zero-count: ${metrics.zeroCount}<br>
+            X-span: ${metrics.xSpan.toFixed(2)}<br>
+            Y-span: ${metrics.ySpan.toFixed(2)}<br>
+            Eye area: ${metrics.area.toFixed(2)}
+          `;
+
+          container.appendChild(plotDiv);
+          container.appendChild(metricsDiv);
+
+          Plotly.newPlot(
+            plotDiv,
+            [
+              {
+                x: data.x,
+                y: data.y,
+                z: zValues,
+                type: "heatmap",
+                colorscale: "Jet",
+              },
+            ],
+            { title: data.name },
+          );
+        });
+      }
+
+      document.getElementById("files").addEventListener("change", function (e) {
+        const files = e.target.files;
+        storedData = [];
+
+        Array.from(files).forEach((file) => {
+          if (!file.name.endsWith(".txt")) return;
+
+          const reader = new FileReader();
+
+          reader.onload = function (event) {
+            const text = event.target.result;
+            const lines = text.split("\n");
+
+            let x = [];
+            let y = [];
+            let z = [];
+            let samplesLog = [];
+
+            lines.forEach((line) => {
+              if (line.startsWith("#") || line.trim() === "") return;
+
+              const parts = line.split(",");
+              if (parts.length < 4) return;
+
+              x.push(Number(parts[0]));
+              y.push(Number(parts[1]));
+              samplesLog.push(Number(parts[2]));
+              z.push(Number(parts[3]));
+            });
+
+            storedData.push({
+              name: file.name,
+              x: x,
+              y: y,
+              z: z,
+              samplesLog: samplesLog,
+            });
+
+            renderPlots();
+          };
+
+          reader.readAsText(file);
+        });
+      });
+
+      document.getElementById("recalc").addEventListener("click", function () {
+        renderPlots();
+      });
+
+      document.getElementById("mode").addEventListener("change", function () {
+        updateToleranceUI();
+        renderPlots();
+      });
+      updateToleranceUI();
+    </script>
+  </body>
+</html>
