@@ -102,28 +102,72 @@
         return zComputed;
       }
 
-      function computeMetrics(data, zValues, tolerance) {
-        let xZero = [];
-        let yZero = [];
-        let zeroCount = 0;
+      function computeMetrics(data, zValues, threshold) {
+        const dy = Math.abs(data.y[1] - data.y[0]);
+        const dx = Math.abs(data.x[1] - data.x[0]);
+        const EPS = Math.max(dx, dy) / 2;
+
+        let xPos = [];
+        let xNeg = [];
+        let yPos = [];
+        let yNeg = [];
 
         for (let i = 0; i < zValues.length; i++) {
-          if (zValues[i] <= tolerance) {
-            zeroCount++;
-            xZero.push(data.x[i]);
-            yZero.push(data.y[i]);
+          const x = data.x[i];
+          const y = data.y[i];
+          const z = zValues[i];
+
+          if (z > threshold) continue;
+
+          if (Math.abs(y) < EPS) {
+            if (x >= 0) xPos.push(x);
+            if (x <= 0) xNeg.push(x);
+          }
+          if (Math.abs(x) < EPS) {
+            if (y >= 0) yPos.push(y);
+            if (y <= 0) yNeg.push(y);
           }
         }
 
-        if (xZero.length === 0) {
-          return { zeroCount: 0, xSpan: 0, ySpan: 0, area: 0 };
+        if (
+          xPos.length === 0 ||
+          xNeg.length === 0 ||
+          yPos.length === 0 ||
+          yNeg.length === 0
+        ) {
+          return {
+            zeroCount: 0,
+            xMin: 0,
+            xMax: 0,
+            yMin: 0,
+            yMax: 0,
+            xSpan: 0,
+            ySpan: 0,
+            rectArea: 0,
+            diamondArea: 0,
+          };
         }
+        const xMax = Math.max(...xPos);
+        const xMin = Math.min(...xNeg);
+        const yMax = Math.max(...yPos);
+        const yMin = Math.min(...yNeg);
 
-        const xSpan = Math.max(...xZero) - Math.min(...xZero);
-        const ySpan = Math.max(...yZero) - Math.min(...yZero);
-        const area = xSpan * ySpan;
+        const xSpan = xMax - xMin;
+        const ySpan = yMax - yMin;
+        const rectArea = xSpan * ySpan;
+        const diamondArea = 0.5 * xSpan * ySpan;
 
-        return { zeroCount, xSpan, ySpan, area };
+        return {
+          zeroCount: xPos.length + xNeg.length + yPos.length + yNeg.length,
+          xMin,
+          xMax,
+          yMin,
+          yMax,
+          xSpan,
+          ySpan,
+          rectArea,
+          diamondArea,
+        };
       }
 
       function renderPlots() {
@@ -143,15 +187,52 @@
           metricsDiv.className = "metrics";
 
           const metrics = computeMetrics(data, zValues, tolerance);
+          const left = Math.abs(metrics.xMin);
+          const right = metrics.xMax;
+          const top = metrics.yMax;
+          const bottom = Math.abs(metrics.yMin);
 
           metricsDiv.innerHTML = `
-            <b>${data.name}</b><br>
-            Mode: ${mode}<br>
-            Zero-count: ${metrics.zeroCount}<br>
-            X-span: ${metrics.xSpan.toFixed(2)}<br>
-            Y-span: ${metrics.ySpan.toFixed(2)}<br>
-            Eye area: ${metrics.area.toFixed(2)}
-          `;
+              <b>${data.name}</b><br>
+              Mode: ${mode}<br>
+              X range: [${metrics.xMin.toFixed(2)}, ${metrics.xMax.toFixed(2)}]<br>
+              Y range: [${metrics.yMin.toFixed(2)}, ${metrics.yMax.toFixed(2)}]<br>
+              X-span: ${metrics.xSpan.toFixed(2)}<br>
+              Y-span: ${metrics.ySpan.toFixed(2)}<br>
+              Eye area: ${metrics.rectArea.toFixed(2)} (rectangle) / ${metrics.diamondArea.toFixed(2)} (diamond) <br>
+              Left: ${left.toFixed(2)} | Right: ${right.toFixed(2)}<br>
+              Top: ${top.toFixed(2)} | Bottom: ${bottom.toFixed(2)}<br>
+              `;
+
+          const layout = {
+            title: data.name,
+            shapes: [
+              // Line: horizontal
+              {
+                type: "line",
+                x0: metrics.xMin,
+                x1: metrics.xMax,
+                y0: 0,
+                y1: 0,
+                line: {
+                  color: "white",
+                  width: 3,
+                },
+              },
+              // Line: vertical
+              {
+                type: "line",
+                x0: 0,
+                x1: 0,
+                y0: metrics.yMin,
+                y1: metrics.yMax,
+                line: {
+                  color: "white",
+                  width: 3,
+                },
+              },
+            ],
+          };
 
           container.appendChild(plotDiv);
           container.appendChild(metricsDiv);
@@ -167,7 +248,7 @@
                 colorscale: "Jet",
               },
             ],
-            { title: data.name },
+            layout,
           );
         });
       }
