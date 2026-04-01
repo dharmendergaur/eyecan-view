@@ -170,6 +170,53 @@
         };
       }
 
+      function computeEyeArea(data, zValues, threshold) {
+        const dx = Math.abs(data.x[1] - data.x[0]);
+        let slices = new Map();
+
+        for (let i = 0; i < zValues.length; i++) {
+          if (zValues[i] > threshold) continue;
+
+          const x = data.x[i];
+          const y = data.y[i];
+
+          if (!slices.has(x)) slices.set(x, []);
+          slices.get(x).push(y);
+        }
+
+        let totalArea = 0;
+
+        slices.forEach((ys, x) => {
+          if (ys.length < 2) return;
+
+          const yMin = Math.min(...ys);
+          const yMax = Math.max(...ys);
+
+          const height = yMax - yMin;
+          totalArea += height * dx;
+        });
+
+        return totalArea;
+      }
+
+      function computePixelArea(data, zValues, threshold) {
+        const uniqueX = [...new Set(data.x)].sort((a, b) => a - b);
+        const uniqueY = [...new Set(data.y)].sort((a, b) => a - b);
+
+        if (uniqueX.length < 2 || uniqueY.length < 2) return 0;
+
+        const dx = Math.abs(uniqueX[1] - uniqueX[0]);
+        const dy = Math.abs(uniqueY[1] - uniqueY[0]);
+
+        let count = 0;
+
+        for (let i = 0; i < zValues.length; i++) {
+          if (zValues[i] <= threshold) count++;
+        }
+
+        return count * dx * dy;
+      }
+
       function renderPlots() {
         const container = document.getElementById("plots");
         container.innerHTML = "";
@@ -200,6 +247,8 @@
               X-span: ${metrics.xSpan.toFixed(2)}<br>
               Y-span: ${metrics.ySpan.toFixed(2)}<br>
               Eye area: ${metrics.rectArea.toFixed(2)} (rectangle) / ${metrics.diamondArea.toFixed(2)} (diamond) <br>
+              Eye area (slices): ${computeEyeArea(data, zValues, tolerance).toFixed(2)}<br>
+              Pixel area: ${computePixelArea(data, zValues, tolerance).toFixed(2)}<br>
               Left: ${left.toFixed(2)} | Right: ${right.toFixed(2)}<br>
               Top: ${top.toFixed(2)} | Bottom: ${bottom.toFixed(2)}<br>
               `;
